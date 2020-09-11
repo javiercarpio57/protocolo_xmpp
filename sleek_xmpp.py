@@ -16,17 +16,25 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 class Usuario():
-    def __init__(self, user, status, show):
+    def __init__(self, user, status, show, subscription, online):
         self.user = user
         self.show = show
         self.status = status
+        self.subscription = subscription
+        self.online = online
 
     def set_states(self, status, show):
         self.status = status
         self.show = show
 
+    def set_online(self, online):
+        self.online = online
+
+    def get_username(self):
+        return self.user
+
     def get_usuario(self):
-        return [self.user, self.status, self.show]
+        return [self.user, self.status, self.show, self.online, self.subscription]
 
 class Cliente(ClientXMPP):
 
@@ -43,22 +51,24 @@ class Cliente(ClientXMPP):
         self.add_event_handler("presence_subscribe", self.presence_subscribe)
         self.add_event_handler("got_offline", self.got_offline)
         self.add_event_handler("got_online", self.got_online)
-        # self.add_event_handler("disconnected", self.on_disconnected)
-        # self.add_event_handler("roster_update", self.roster_update, disposable=True)
         
         self.register_plugin('xep_0030') # Service Discovery
         self.register_plugin('xep_0199') # XMPP Ping
         self.register_plugin('xep_0004') # Data forms
         self.register_plugin('xep_0077') # In-band Registration
+        self.register_plugin('xep_0045') # Mulit-User Chat (MUC)
 
         import ssl
         self.ssl_version = ssl.PROTOCOL_TLS
         
     def presence_unsubscribe(self, presence):
-        print('unsubscribe', presence)
         person = self.jid_to_user(presence['from'])
 
         print(bcolors.FAIL + '-- %s te eliminó -- ' %(person) + bcolors.ENDC)
+        for i in range(len(self.usuarios)):
+            if self.usuarios[i].get_username() == person:
+                self.usuarios.pop(i)
+                break
 
     def presence_subscribe(self, presence):
         person = self.jid_to_user(presence['from'])
@@ -66,32 +76,59 @@ class Cliente(ClientXMPP):
         print(bcolors.OKGREEN + '-- %s te agregó -- ' %(person) + bcolors.ENDC)
         self.SendMessageTo(presence['from'], 'Gracias por agregarme :)')
 
+        u = Usuario(person, '---', '---', 'both', 'No')
+        self.usuarios.append(u)
+
     def got_offline(self, presence):        
         if self.jid not in str(presence['from']):
-            print(bcolors.FAIL + '-- %(from)s está en offline -- ' %(presence) + bcolors.ENDC)
+            u = self.jid_to_user(str(presence['from']))
+            print(bcolors.FAIL + '-- %s está en offline -- ' %(u) + bcolors.ENDC)
+
+            for i in self.usuarios:
+                if i.get_username() == u:
+                    i.set_online('No')
+                    break
 
     def got_online(self, presence):
-        # print('online', presence, presence['from'])
-        if self.jid not in str(presence['from']):
-            print(bcolors.OKGREEN + '-- %(from)s está en online -- ' %(presence) + bcolors.ENDC)
+        # print('ONLINE:', presence)
+        isGroup = self.IsGroup(str(presence['from']))
+        if isGroup:
+            nick = str(presence['from']).split('@')[1].split('/')[1]
+            groupname = str(presence['from']).split('@')[0]
+            print(bcolors.OKGREEN + '-- %s está en %s -- ' %(nick, groupname) + bcolors.ENDC)
+        else:
+            if self.jid not in str(presence['from']):
+                u = self.jid_to_user(str(presence['from']))
+                print(bcolors.OKGREEN + '-- %s está en online -- ' %(u) + bcolors.ENDC)
 
-    # def roster_update(self, roster):
-    #     print('roster update', roster)
+                for i in self.usuarios:
+                    if i.get_username() == u:
+                        i.set_online('Sí')
+                        break
 
     def session_start(self, event):
         self.send_presence(pshow='chat', pstatus='Listo para chatear, amigos :)')
-        self.get_roster()
-        # self.
-        # print(roster)
+        roster = self.get_roster()
+        
+        for r in roster['roster']['items'].keys():
+            subs = str(roster['roster']['items'][r]['subscription'])
+
+            user = self.jid_to_user(str(r))
+
+            if user != self.jid_to_user(self.my_jid):
+                show = '---'
+                status = 'unavailable'
+                
+                u = Usuario(user, status, show, subs, 'No')
+                self.usuarios.append(u)
 
     def message(self, msg):
         if msg['type'] in ('chat', 'normal'):
             print(bcolors.WARNING + '\t==> [PRIVATELY: %(from)s] %(body)s' % (msg) + bcolors.ENDC)
+        if str(msg['type']) == 'groupchat':
+            print(bcolors.WARNING + '\t--> (%(from)s): %(body)s' %(msg) + bcolors.ENDC)
 
     def on_presence(self, presence):
-        print('presence', presence)
-        # who = str(presence['from'])
-        # self.update_roster()
         user = str(presence['from'])
         user = self.jid_to_user(user)
 
@@ -101,15 +138,13 @@ class Cliente(ClientXMPP):
                 show = '---'
             else:
                 if str(presence['status']):
-                    print(presence['status'])
                     status = str(presence['status'])
                 else:
-                    status = ''
+                    status = '---'
                 if str(presence['show']):
-                    print(presence['show'])
                     show = str(presence['show'])
                 else:
-                    show = ''
+                    show = '---'
 
             encontrado = False
             index = 0
@@ -123,11 +158,19 @@ class Cliente(ClientXMPP):
                 self.usuarios[index].set_states(status, show)
             else:
                 u = Usuario(user, status, show)
-                print(u.get_usuario())
                 self.usuarios.append(u)
+
+    def IsGroup(self, from_jid):
+        if 'conference' in from_jid.split('@')[1]:
+            return True
+        else:
+            return False
 
     def SendMessageTo(self, jid, message):
         self.send_message(mto=jid, mbody=message, mtype='chat')
+
+    def SendMessageRoom(self, room, message):
+        self.send_message(mto=room, mbody=message, mtype='groupchat')
 
     def Login(self):
         success = False
@@ -143,13 +186,18 @@ class Cliente(ClientXMPP):
     def AddUser(self, jid):
         self.send_presence_subscription(pto=jid)
 
+    def GetUser(self, username):
+        us = []
+        for i in self.usuarios:
+            if username.lower() == i.get_username():
+                us.append(i.get_usuario())
+        return us            
+
     def GetUsers(self):
-        # self.
-        # users = []
-        # for i in self.roster.keys():
-        #     for j in self.roster[i].keys():
-        #         print('--', self.roster[i][j], '--')
-        #         users.append(j)
+
+        for i in self.roster.keys():
+            for j in self.roster[i].keys():
+                print('--', self.roster[i][j], '--')
 
         us = []
         for i in self.usuarios:
@@ -164,14 +212,22 @@ class Cliente(ClientXMPP):
     def RemoveUser(self, jid):
         self.del_roster_item(jid)
 
+        person = self.jid_to_user(jid)
+        for i in range(len(self.usuarios)):
+            if self.usuarios[i].get_username() == person:
+                self.usuarios.pop(i)
+                break
+
     def ChangeStatus(self, show, status):
         self.send_presence(pshow=show, pstatus=status)
+
+    def JoinOrCreateRoom(self, room, nickname):
+        self.plugin['xep_0045'].joinMUC(room, nickname, wait=True)
+        
 
 class RegisterBot(sleekxmpp.ClientXMPP):
     def __init__(self, jid, password):
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
-        self.name = name
-        self.email = email
 
         self.add_event_handler('session_start', self.start)
         self.add_event_handler('register', self.register)
@@ -202,7 +258,6 @@ class RegisterBot(sleekxmpp.ClientXMPP):
         except IqTimeout:
             print(bcolors.FAIL + 'Sin respuesta del server...' + bcolors.ENDC)
             self.disconnect()
-
 
 if __name__ == '__main__':
     # logging.basicConfig(level=logging.DEBUG,
@@ -235,6 +290,7 @@ if __name__ == '__main__':
 6. Definir mensaje de presencia
 7. Eliminar usuario
 8. Cambiar de estado
+9. Crear o unirte a sala
 ====================================
 '''
 
@@ -248,8 +304,6 @@ if __name__ == '__main__':
             if opcion == '1':
                 username = input('Ingrese su username: ')
                 password = input('Ingrese su password: ')
-                # username = 'Javi'
-                # password = 'javi'
 
                 regi = RegisterBot(username + domain, password)
 
@@ -260,8 +314,6 @@ if __name__ == '__main__':
             elif opcion == '2':
                 username = input('Ingrese su username: ')
                 password = input('Ingrese su password: ')
-                # username = 'Javi'
-                # password = 'javi'
 
                 xmpp = Cliente(username + domain, password)
                 if xmpp.Login():
@@ -275,22 +327,38 @@ if __name__ == '__main__':
 
             if opcion == '1':
                 users = xmpp.GetUsers()
-                t = PrettyTable(['User', 'Status', 'Show'])
+                t = PrettyTable(['User', 'Status', 'Show', 'Online', 'Subscription'])
                 for i in users:
                     t.add_row(i)
                 print(t)
+
             elif opcion == '2':
                 user = input('Ingrese el jid: ')
                 xmpp.AddUser(user)
+
             elif opcion == '3':
-                print('')
+                u = input('Ingresa el username para obtener información: ')
+                users = xmpp.GetUser(u)
+                t = PrettyTable(['User', 'Status', 'Show', 'Online', 'Subscription'])
+                for i in users:
+                    t.add_row(i)
+                print(t)
+
             elif opcion == '4':
                 to = input('¿A quién va el mensaje? ')
                 msg = input('Ingresa el mensaje: ')
                 xmpp.SendMessageTo(to, msg)
+
+            elif opcion == '5':
+                room = input('Ingrese el room para enviar mensaje: ')
+                msg = input('Ingrese su mensaje: ')
+
+                xmpp.SendMessageRoom(room, msg)
+
             elif opcion == '7':
                 remove_to = input('¿A quién deseas eliminar? ')
                 xmpp.RemoveUser(remove_to)
+
             elif opcion == '8':
                 show_error = True
                 while show_error:
@@ -299,6 +367,13 @@ if __name__ == '__main__':
                         show_error = False
                 status = input('Ingrese su nuevo estado: ')
                 xmpp.ChangeStatus(show_state[show], status)
+            
+            elif opcion == '9':
+                room = input('Ingrese room: ')
+                nickname = input('Ingresa tu nickname: ')
+
+                xmpp.JoinOrCreateRoom(room, nickname)
             elif opcion == '0':
                 xmpp.disconnect()
+                opcion = ''
                 hasLogin = False
