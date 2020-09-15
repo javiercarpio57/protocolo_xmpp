@@ -1,9 +1,21 @@
 import logging
 
 from sleekxmpp import ClientXMPP
+from sleekxmpp.xmlstream.stanzabase import ET, ElementBase
+from sleekxmpp.plugins.xep_0096 import stanza, File
 from sleekxmpp.exceptions import IqError, IqTimeout
 import sleekxmpp
 from prettytable import PrettyTable
+
+import subprocess
+from tkinter import filedialog
+import os
+
+# import magic
+import filetype
+import base64
+from datetime import datetime
+import time
 
 class bcolors:
     HEADER = '\033[95m'
@@ -14,6 +26,11 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
+def my_file():
+    filename = filedialog.askopenfilename( initialdir="C:/", title="select file", filetypes=(("all files", "*.*"), ("text files", "*.txt")))
+
+    return filename
 
 class Usuario():
     def __init__(self, user, status, show, subscription, online):
@@ -43,6 +60,8 @@ class Cliente(ClientXMPP):
         self.timeout = 45
         self.my_jid = jid.lower()
         self.usuarios = []
+        self.rooms = {}
+        self.contador_rooms = 1
 
         self.add_event_handler('session_start', self.session_start)
         self.add_event_handler('message', self.message)
@@ -57,6 +76,7 @@ class Cliente(ClientXMPP):
         self.register_plugin('xep_0004') # Data forms
         self.register_plugin('xep_0077') # In-band Registration
         self.register_plugin('xep_0045') # Mulit-User Chat (MUC)
+        self.register_plugin('xep_0096') # File transfer
 
         import ssl
         self.ssl_version = ssl.PROTOCOL_TLS
@@ -90,7 +110,6 @@ class Cliente(ClientXMPP):
                     break
 
     def got_online(self, presence):
-        # print('ONLINE:', presence)
         isGroup = self.IsGroup(str(presence['from']))
         if isGroup:
             nick = str(presence['from']).split('@')[1].split('/')[1]
@@ -107,7 +126,7 @@ class Cliente(ClientXMPP):
                         break
 
     def session_start(self, event):
-        self.send_presence(pshow='chat', pstatus='Listo para chatear, amigos :)')
+        self.send_presence(pshow='chat', pstatus='Quiero dormirrr')
         roster = self.get_roster()
         
         for r in roster['roster']['items'].keys():
@@ -124,7 +143,15 @@ class Cliente(ClientXMPP):
 
     def message(self, msg):
         if msg['type'] in ('chat', 'normal'):
-            print(bcolors.WARNING + '\t==> [PRIVATELY: %(from)s] %(body)s' % (msg) + bcolors.ENDC)
+            if msg['subject'] == 'send_file':
+                img_body = msg['body']
+                file_ = img_body.encode('utf-8')
+                file_ = base64.decodebytes(file_)
+                with open("redes_" + str(int(time.time())) + ".png", "wb") as f:
+                    f.write(file_)
+                print(bcolors.WARNING + '\t==> %(from)s te envió un archivo...' % (msg) + bcolors.ENDC)
+            else:
+                print(bcolors.WARNING + '\t==> [PRIVATELY: %(from)s] %(body)s' % (msg) + bcolors.ENDC)
         if str(msg['type']) == 'groupchat':
             print(bcolors.WARNING + '\t--> (%(from)s): %(body)s' %(msg) + bcolors.ENDC)
 
@@ -186,24 +213,103 @@ class Cliente(ClientXMPP):
     def AddUser(self, jid):
         self.send_presence_subscription(pto=jid)
 
+    def SendFile(self, path, to):
+        with open(path, 'rb') as img:
+            file_ = base64.b64encode(img.read()).decode('utf-8')
+
+        self.send_message(mto=to, mbody=file_, msubject='send_file', mtype='chat')
+        
+
     def GetUser(self, username):
+        iq = self.Iq()
+        iq['type'] = 'set'
+        iq['id'] = 'search_result'
+        iq['to'] = 'search.redes2020.xyz'
+
+        item = ET.fromstring("<query xmlns='jabber:iq:search'> \
+                                <x xmlns='jabber:x:data' type='submit'> \
+                                    <field type='hidden' var='FORM_TYPE'> \
+                                        <value>jabber:iq:search</value> \
+                                    </field> \
+                                    <field var='Username'> \
+                                        <value>1</value> \
+                                    </field> \
+                                    <field var='search'> \
+                                        <value>" + username + "</value> \
+                                    </field> \
+                                </x> \
+                              </query>")
+        iq.append(item)
+        res = iq.send()
+        
+        data = []
+        temp = []
+        cont = 0
+        for i in res.findall('.//{jabber:x:data}value'):
+            cont += 1
+            txt = ''
+            if i.text == None:
+                txt = '--'
+            else:
+                txt = i.text
+
+            temp.append(txt)
+            if cont == 4:
+                cont = 0
+                data.append(temp)
+                temp = []
+
         us = []
         for i in self.usuarios:
             if username.lower() == i.get_username():
                 us.append(i.get_usuario())
-        return us            
+        return us, data
 
     def GetUsers(self):
 
-        for i in self.roster.keys():
-            for j in self.roster[i].keys():
-                print('--', self.roster[i][j], '--')
+        iq = self.Iq()
+        iq['type'] = 'set'
+        iq['id'] = 'search_result'
+        iq['to'] = 'search.redes2020.xyz'
+
+        item = ET.fromstring("<query xmlns='jabber:iq:search'> \
+                                <x xmlns='jabber:x:data' type='submit'> \
+                                    <field type='hidden' var='FORM_TYPE'> \
+                                        <value>jabber:iq:search</value> \
+                                    </field> \
+                                    <field var='Username'> \
+                                        <value>1</value> \
+                                    </field> \
+                                    <field var='search'> \
+                                        <value>*</value> \
+                                    </field> \
+                                </x> \
+                              </query>")
+        iq.append(item)
+        res = iq.send()
+        
+        data = []
+        temp = []
+        cont = 0
+        for i in res.findall('.//{jabber:x:data}value'):
+            cont += 1
+            txt = ''
+            if i.text == None:
+                txt = '--'
+            else:
+                txt = i.text
+
+            temp.append(txt)
+            if cont == 4:
+                cont = 0
+                data.append(temp)
+                temp = []
 
         us = []
         for i in self.usuarios:
             us.append(i.get_usuario())
 
-        return us
+        return us, data
 
     def jid_to_user(self, jid):
         jid = str(jid)
@@ -223,11 +329,26 @@ class Cliente(ClientXMPP):
 
     def JoinOrCreateRoom(self, room, nickname):
         self.plugin['xep_0045'].joinMUC(room, nickname, wait=True)
+        self.rooms[str(self.contador_rooms)] = room
+        self.contador_rooms += 1
+
+    def Unregister(self):
+        iq = self.make_iq_set(ito='redes2020.xyz', ifrom=self.boundjid.user)
+        item = ET.fromstring("<query xmlns='jabber:iq:register'> \
+                                <remove/> \
+                              </query>")
+        iq.append(item)
+        res = iq.send()
+        if res['type'] == 'result':
+            print(bcolors.OKGREEN + 'Cuenta eliminada' + bcolors.ENDC)
+
         
 
-class RegisterBot(sleekxmpp.ClientXMPP):
-    def __init__(self, jid, password):
+class RegisterUser(sleekxmpp.ClientXMPP):
+    def __init__(self, jid, password, name, email):
         sleekxmpp.ClientXMPP.__init__(self, jid, password)
+        self.name = name
+        self.email = email
 
         self.add_event_handler('session_start', self.start)
         self.add_event_handler('register', self.register)
@@ -248,6 +369,8 @@ class RegisterBot(sleekxmpp.ClientXMPP):
         resp['type'] = 'set'
         resp['register']['username'] = self.boundjid.user
         resp['register']['password'] = self.password
+        resp['register']['name'] = self.name
+        resp['register']['email'] = self.email
 
         try:
             resp.send(now=True)
@@ -260,8 +383,6 @@ class RegisterBot(sleekxmpp.ClientXMPP):
             self.disconnect()
 
 if __name__ == '__main__':
-    # logging.basicConfig(level=logging.DEBUG,
-    #                     format='%(levelname)-8s %(message)s')
 
     domain = '@redes2020.xyz'
     show_state = {
@@ -286,11 +407,11 @@ if __name__ == '__main__':
 2. Agregar un usuario a contactos
 3. Mostrar detalles de contacto
 4. Enviar mensaje privado
-5. Enviar mensaje grupal
-6. Definir mensaje de presencia
-7. Eliminar usuario
-8. Cambiar de estado
-9. Crear o unirte a sala
+5. Funcionalidad de rooms
+6. Definir mensaje de presencia (cambiar estado)
+7. Eliminar a un usuario
+8. Enviar un archivo
+9. Eliminar mi cuenta
 ====================================
 '''
 
@@ -302,10 +423,12 @@ if __name__ == '__main__':
             opcion = input(menu1)
 
             if opcion == '1':
-                username = input('Ingrese su username: ')
-                password = input('Ingrese su password: ')
+                username = input('Ingrese tu username: ')
+                password = input('Ingrese tu password: ')
+                name = input('Ingresa tu nombre: ')
+                email = input('Ingresa tu email: ')
 
-                regi = RegisterBot(username + domain, password)
+                regi = RegisterUser(username + domain, password, name, email)
 
                 if regi.connect():
                     regi.process(block=True)
@@ -326,11 +449,16 @@ if __name__ == '__main__':
             opcion = input(menu2)
 
             if opcion == '1':
-                users = xmpp.GetUsers()
+                users, server_users = xmpp.GetUsers()
                 t = PrettyTable(['User', 'Status', 'Show', 'Online', 'Subscription'])
                 for i in users:
                     t.add_row(i)
                 print(t)
+
+                t2 = PrettyTable(['Email', 'JID', 'Username', 'Name'])
+                for i in server_users:
+                    t2.add_row(i)
+                print(t2)
 
             elif opcion == '2':
                 user = input('Ingrese el jid: ')
@@ -338,11 +466,16 @@ if __name__ == '__main__':
 
             elif opcion == '3':
                 u = input('Ingresa el username para obtener información: ')
-                users = xmpp.GetUser(u)
+                users, server_user = xmpp.GetUser(u)
                 t = PrettyTable(['User', 'Status', 'Show', 'Online', 'Subscription'])
                 for i in users:
                     t.add_row(i)
                 print(t)
+
+                t2 = PrettyTable(['Email', 'JID', 'Username', 'Name'])
+                for i in server_user:
+                    t2.add_row(i)
+                print(t2)
 
             elif opcion == '4':
                 to = input('¿A quién va el mensaje? ')
@@ -350,16 +483,26 @@ if __name__ == '__main__':
                 xmpp.SendMessageTo(to, msg)
 
             elif opcion == '5':
-                room = input('Ingrese el room para enviar mensaje: ')
-                msg = input('Ingrese su mensaje: ')
+                opcion_menu = input('1. Crear o unirte a sala\n2. Enviar mensaje a sala\n')
+                if opcion_menu == '1':
+                    room = input('Ingrese room: ')
+                    nickname = input('Ingresa tu nickname: ')
 
-                xmpp.SendMessageRoom(room, msg)
+                    xmpp.JoinOrCreateRoom(room, nickname)
 
-            elif opcion == '7':
-                remove_to = input('¿A quién deseas eliminar? ')
-                xmpp.RemoveUser(remove_to)
+                elif opcion_menu == '2':
+                    for index, r in xmpp.rooms.items():
+                        print(str(index) + '. ' + r)
+                    room = input('Ingrese el room para enviar mensaje (numero): ')
+                    if room in xmpp.rooms.keys():
+                        msg = input('Ingrese su mensaje: ')
+                        xmpp.SendMessageRoom(xmpp.rooms[room], msg)
+                    else:
+                        print('Opcion incorrecta')
+                else:
+                    print('Opcion incorrecta')
 
-            elif opcion == '8':
+            elif opcion == '6':
                 show_error = True
                 while show_error:
                     show = input('Ingresa tu show:\n 1. chat\n 2. away\n 3. xa\n 4. dnd\n')
@@ -367,13 +510,21 @@ if __name__ == '__main__':
                         show_error = False
                 status = input('Ingrese su nuevo estado: ')
                 xmpp.ChangeStatus(show_state[show], status)
-            
-            elif opcion == '9':
-                room = input('Ingrese room: ')
-                nickname = input('Ingresa tu nickname: ')
 
-                xmpp.JoinOrCreateRoom(room, nickname)
-            elif opcion == '0':
+            elif opcion == '7':
+                remove_to = input('¿A quién deseas eliminar? ')
+                xmpp.RemoveUser(remove_to)
+            
+            elif opcion == '8':
+                path = my_file()
+                to_person = input('Ingresa el jid para enviar archivo: ')
+                xmpp.SendFile(path, to_person)
+
+            elif opcion == '9':
+                xmpp.Unregister()
+                opcion = '0'
+
+            if opcion == '0':
                 xmpp.disconnect()
                 opcion = ''
                 hasLogin = False
