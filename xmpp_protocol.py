@@ -160,7 +160,7 @@ class Cliente(ClientXMPP):
     # Trigger when someone sends a private chat and groupchat
     def message(self, msg):
         if msg['type'] in ('chat', 'normal'):
-            if msg['subject'] == 'send_file':
+            if msg['subject'] == 'send_file' or len(msg['body']) > 500:
                 img_body = msg['body']
                 file_ = img_body.encode('utf-8')
                 file_ = base64.decodebytes(file_)
@@ -360,8 +360,13 @@ class Cliente(ClientXMPP):
         self.send_presence(pshow=show, pstatus=status)
 
     # Let user to join or create a room
-    def JoinOrCreateRoom(self, room, nickname):
+    def JoinOrCreateRoom(self, room, nickname, creating):
         self.plugin['xep_0045'].joinMUC(room, nickname, wait=True)
+
+        if creating:
+            self.plugin['xep_0045'].setAffiliation(room, self.boundjid.full, affiliation='owner')
+            self.plugin['xep_0045'].configureRoom(room, ifrom=self.boundjid.full)
+
         self.rooms[str(self.contador_rooms)] = room
         self.contador_rooms += 1
 
@@ -521,14 +526,19 @@ if __name__ == '__main__':
                 xmpp.SendMessageTo(to, msg)
 
             elif opcion == '5':
-                opcion_menu = input('1. Crear o unirte a sala\n2. Enviar mensaje a sala\n')
+                opcion_menu = input('1. Crear sala\n2. Unirte a sala\n3. Enviar mensaje a sala\n')
                 if opcion_menu == '1':
                     room = input('Ingrese room: ')
                     nickname = input('Ingresa tu nickname: ')
 
-                    xmpp.JoinOrCreateRoom(room, nickname)
-
+                    xmpp.JoinOrCreateRoom(room, nickname, True)
                 elif opcion_menu == '2':
+                    room = input('Ingrese room: ')
+                    nickname = input('Ingresa tu nickname: ')
+
+                    xmpp.JoinOrCreateRoom(room, nickname, False)
+
+                elif opcion_menu == '3':
                     for index, r in xmpp.rooms.items():
                         print(str(index) + '. ' + r)
                     room = input('Ingrese el room para enviar mensaje (numero): ')
