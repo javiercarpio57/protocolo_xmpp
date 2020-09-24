@@ -30,7 +30,7 @@ Choose option 4, and fill the receiver and message content fields.
 ### Rooms
 Choose option 5, and to join or create a new room select 1, and write the room's jid. Otherwise, select 2 to send messages to groups that you've joined previously.
 
-## Presence stanza
+### Presence stanza
 In other words, changing your status. Choose option 6 and fill the show and status fields to change your status.
 
 ### Send files
